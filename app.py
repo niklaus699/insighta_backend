@@ -635,6 +635,64 @@ def get_me():
         }
     }), 200
 
+@app.route('/auth/cli/exchange', methods=['POST'])
+@limiter.limit("10 per minute")
+def cli_exchange():
+    data = request.json
+    code = data.get('code')
+    
+    if not code:
+        return jsonify({"status": "error", "message": "Code required"}), 400
+
+    # --- THE EXCHANGE LOGIC (Extracted from your callback) ---
+    token_resp = requests.post(
+        'https://github.com/login/oauth/access_token',
+        json={
+            'client_id': GITHUB_CLIENT_ID,
+            'client_secret': GITHUB_CLIENT_SECRET,
+            'code': code,
+            'redirect_uri': GITHUB_REDIRECT_URI
+        },
+        headers={'Accept': 'application/json'}
+    ).json()
+
+    if 'access_token' not in token_resp:
+        return jsonify({"status": "error", "message": "Invalid code from GitHub"}), 401
+
+    user_data = requests.get(
+        'https://api.github.com/user',
+        headers={'Authorization': f"token {token_resp['access_token']}"}
+    ).json()
+
+    # --- USER SYNC LOGIC ---
+    user = User.query.filter_by(github_id=str(user_data['id'])).first()
+    if not user:
+        user = User.query.filter_by(email=user_data.get('email')).first()
+        if user:
+            user.github_id = str(user_data['id'])
+        else:
+            user = User(
+                id=str(uuid6.uuid7()),
+                github_id=str(user_data['id']),
+                username=user_data.get('login'),
+                email=user_data.get('email'),
+                avatar_url=user_data.get('avatar_url'),
+                role='analyst'
+            )
+            db.session.add(user)
+    
+    user.last_login_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    # --- GENERATE TOKENS FOR CLI ---
+    access = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    refresh = create_refresh_token(identity=str(user.id))
+
+    return jsonify({
+        "status": "success",
+        "access_token": access,
+        "refresh_token": refresh
+    }), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
