@@ -130,8 +130,6 @@ class RequestLog(db.Model):
     response_time = db.Column(db.Float)
     timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-with app.app_context():
-    db.create_all()
 
 # --- UTILS ---
 

@@ -99,4 +99,5 @@ def seed_data():
         print(f"Success! Seeded {count} new profiles.")
 
 if __name__ == "__main__":
-    seed_data()
+    with app.app_context():
+        seed_data()
