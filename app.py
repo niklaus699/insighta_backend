@@ -342,7 +342,7 @@ def web_callback():
 
     # 2. Exchange code for GitHub Access Token
     # FIX: Use the Vercel callback URI to match your new github_redirect logic
-    web_redirect_uri = "https://insighta-web-zeta-lemon.vercel.app/auth/callback"
+    web_redirect_uri = GITHUB_REDIRECT_URI
     
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
