@@ -622,14 +622,15 @@ def get_me():
 
     if not user:
         return jsonify({"msg": "User not found"}), 404
-
-    return jsonify({
+    
+    user_dict = {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "role": user.role,
         "github_id": user.github_id
-    }), 200
+    }
+    return jsonify(user_dict), 200
 
 
 if __name__ == '__main__':
