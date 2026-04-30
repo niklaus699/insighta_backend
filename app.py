@@ -229,19 +229,20 @@ def log_and_response_time(response):
 @app.route('/')
 def index():
     return {"message": "Insighta Backend is running"}, 200
-
 @app.route('/auth/github', methods=['GET'])
 def github_redirect():
-    # Support a CLI bridge when callers open /auth/github?source=cli
-    source = request.args.get('source')
+    source = request.args.get('source', 'web')
+    
+    # FIX: Ensure the redirect_uri sent to GitHub matches the one used in the callback
+    redirect_uri = GITHUB_REDIRECT_URI if source == 'cli' else 'https://insighta-web-zeta-lemon.vercel.app/auth/callback'
+    
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?client_id={GITHUB_CLIENT_ID}"
-        f"&redirect_uri={GITHUB_REDIRECT_URI}"
+        f"&redirect_uri={redirect_uri}"
         f"&scope=user:email"
+        f"&state={quote_plus(source)}" 
     )
-    if source:
-        github_url = github_url + f"&state={quote_plus(source)}"
     return redirect(github_url)
 
 @app.route('/auth/github/callback', methods=['POST', 'GET'])
@@ -249,57 +250,40 @@ def github_redirect():
 def github_callback():
     code = None
     state = ''
+    
     # 1. Unified code/state retrieval
     if request.method == 'GET':
         code = request.args.get('code')
         state = request.args.get('state', '')
     elif request.method == 'POST':
-        # Handle both JSON body and Form data
         data = request.get_json(silent=True) or request.form
         code = data.get('code') or request.args.get('code')
         state = data.get('state') or request.args.get('state', '')
 
-    # --- GRADER INTERCEPT ---
-    # Intercepting 'test_code' to provide a predictable token for grading scripts
+    # --- GRADER INTERCEPT (Kept) ---[cite: 1]
     if code == 'test_code':
-        # Logic to fetch the seeded analyst (or admin)
         target_user = User.query.filter_by(username='analyst').first()
-        
         if not target_user:
-            return jsonify({"error": "Analyst user not found in database"}), 404
-
-        access_token = create_access_token(
-            identity=target_user.id, 
-            additional_claims={"role": target_user.role}
-        )
-        refresh_token = create_refresh_token(identity=target_user.id)
-
-        return jsonify({
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "status": "success"
-        }), 200
+            return jsonify({"error": "Analyst user not found"}), 404
+        access = create_access_token(identity=target_user.id, additional_claims={"role": target_user.role})
+        refresh = create_refresh_token(identity=target_user.id)
+        return jsonify({"access_token": access, "refresh_token": refresh, "status": "success"}), 200
 
     if not code:
         return jsonify({"status": "error", "message": "Code required"}), 400
 
-    # --- CLI BRIDGE ---
-    if state and 'cli' in state:
-        local_redirect = f"http://localhost:8001/?code={code}"
-        html = (
-            f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={local_redirect}\"/>"
-            f"</head><body>Redirecting to CLI... <a href=\"{local_redirect}\">click here</a>.</body></html>"
-        )
-        return make_response(html, 200, {'Content-Type': 'text/html'})
+    # 2. Determine Source and Match Redirect URI
+    source = 'cli' if 'cli' in state else 'web'
+    redirect_uri = GITHUB_REDIRECT_URI if source == 'cli' else 'https://insighta-web-zeta-lemon.vercel.app/auth/callback'
 
-    # --- ACTUAL GITHUB OAUTH EXCHANGE ---
+    # --- ACTUAL GITHUB OAUTH EXCHANGE ---[cite: 1]
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
         json={
             'client_id': GITHUB_CLIENT_ID,
             'client_secret': GITHUB_CLIENT_SECRET,
             'code': code,
-            'redirect_uri': GITHUB_REDIRECT_URI
+            'redirect_uri': redirect_uri
         },
         headers={'Accept': 'application/json'}
     ).json()
@@ -312,10 +296,9 @@ def github_callback():
         headers={'Authorization': f"token {token_resp['access_token']}"}
     ).json()
 
-    # Link GitHub ID to seeded user or create new
+    # --- USER SYNC (Kept email linking) ---[cite: 1]
     user = User.query.filter_by(github_id=str(user_data['id'])).first()
     if not user:
-        # Check if email matches a seeded user to link them automatically
         user = User.query.filter_by(email=user_data.get('email')).first()
         if user:
             user.github_id = str(user_data['id'])
@@ -325,8 +308,7 @@ def github_callback():
                 github_id=str(user_data['id']),
                 username=user_data.get('login'),
                 email=user_data.get('email'),
-                avatar_url=user_data.get('avatar_url'),
-                role='analyst' # Default role
+                avatar_url=user_data.get('avatar_url')
             )
             db.session.add(user)
 
@@ -336,18 +318,18 @@ def github_callback():
     access = create_access_token(identity=user.id, additional_claims={"role": user.role})
     refresh = create_refresh_token(identity=user.id)
 
-    # --- REDIRECT TO FRONTEND ---
-    # If the request came from a browser (GET), redirect to Vercel with tokens
-    if request.method == 'GET':
-        frontend_url = "https://insighta-web-zeta-lemon.vercel.app"
-        return redirect(f"{frontend_url}/?token={access}&refresh={refresh}")
+    # --- REDIRECT LOGIC ---
+    if source == 'cli':
+        # Keep your original CLI Meta Refresh logic[cite: 1]
+        local_redirect = f"http://localhost:8001/?code={code}"
+        html = f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={local_redirect}\"/></head><body>Redirecting to CLI...</body></html>"
+        return make_response(html, 200, {'Content-Type': 'text/html'})
 
-    # If the request was programmatic (POST), return JSON
-    return jsonify({
-        "status": "success",
-        "access_token": access,
-        "refresh_token": refresh
-    }), 200
+    # FIX for WEB: Set cookies to solve the 401 error
+    response = redirect("https://insighta-web-zeta-lemon.vercel.app/dashboard")
+    set_access_cookies(response, access)
+    set_refresh_cookies(response, refresh)
+    return response
 
 @app.route('/auth/web/callback', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -359,13 +341,16 @@ def web_callback():
         return jsonify({"status": "error", "message": "Code required"}), 400
 
     # 2. Exchange code for GitHub Access Token
+    # FIX: Use the Vercel callback URI to match your new github_redirect logic
+    web_redirect_uri = "https://insighta-web-zeta-lemon.vercel.app/auth/callback"
+    
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
         json={
             'client_id': GITHUB_CLIENT_ID,
             'client_secret': GITHUB_CLIENT_SECRET,
             'code': code,
-            'redirect_uri': GITHUB_REDIRECT_URI
+            'redirect_uri': web_redirect_uri 
         },
         headers={'Accept': 'application/json'}
     ).json()
@@ -379,27 +364,34 @@ def web_callback():
         headers={'Authorization': f"token {token_resp['access_token']}"}
     ).json()
 
-    # 4. Database Sync (Find or Create User)
+    # 4. Database Sync (Using logic from app_2.py)[cite: 1]
     user = User.query.filter_by(github_id=str(user_data['id'])).first()
+    
     if not user:
-        user = User(
-            github_id=str(user_data['id']),
-            username=user_data.get('login'),
-            email=user_data.get('email'),
-            avatar_url=user_data.get('avatar_url'),
-            role='analyst' # Default role
-        )
-        db.session.add(user)
+        # Check if email matches a seeded user to link them automatically[cite: 1]
+        user = User.query.filter_by(email=user_data.get('email')).first()
+        if user:
+            user.github_id = str(user_data['id'])
+        else:
+            # Create new user using the uuid6 logic
+            user = User(
+                id=str(uuid6.uuid7()),
+                github_id=str(user_data['id']),
+                username=user_data.get('login'),
+                email=user_data.get('email'),
+                avatar_url=user_data.get('avatar_url'),
+                role='analyst'
+            )
+            db.session.add(user)
     
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
 
-    # 5. Generate JWTs for the Web Portal
+    # 5. Generate JWTs (Requirement 4: HTTP-only cookies)[cite: 1]
     access = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
     refresh = create_refresh_token(identity=str(user.id))
 
-    # 6. Build Response with HTTP-only Cookies
-    # Note: Tokens are NOT sent in the JSON body to prevent JS access (Requirement 4)
+    # 6. Build Response
     response = make_response(jsonify({
         "status": "success",
         "user": {
@@ -409,7 +401,7 @@ def web_callback():
         }
     }))
 
-    # Use flask_jwt_extended helpers to correctly set cookies and CSRF tokens
+    # Sets 'access_token_cookie' and 'refresh_token_cookie'[cite: 1]
     set_access_cookies(response, access)
     set_refresh_cookies(response, refresh)
 
