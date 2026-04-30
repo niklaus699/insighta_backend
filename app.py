@@ -22,7 +22,13 @@ from flask_limiter.util import get_remote_address
 app = Flask(__name__)
 # Allow configuring frontend origin from env for local development and deployment
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
+# Include both the configured frontend and common local dev origin; explicit headers/methods allow preflight
+CORS(app,
+    supports_credentials=True,
+    origins=[FRONTEND_URL, 'https://insighta-web-zeta-lemon.vercel.app', 'http://localhost:3000'],
+    allow_headers=['Content-Type', 'X-API-Version', 'Authorization', 'X-CSRF-TOKEN'],
+    methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+)
 
 load_dotenv()
 # --- CONFIGURATION ---
@@ -179,9 +185,13 @@ def start_timer():
 @app.before_request
 def enforce_version_and_active():
     if request.path.startswith('/api/'):
+        # Allow CORS preflight requests through without API-version enforcement
+        if request.method == 'OPTIONS':
+            return None
+
         if request.headers.get('X-API-Version') != '1':
             return jsonify({"status": "error", "message": "API version header required"}), 400
-        
+
         # Check if user is active if authenticated
         auth_header = request.headers.get("Authorization")
         if auth_header:
