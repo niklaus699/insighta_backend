@@ -252,31 +252,19 @@ def github_redirect():
 @limiter.limit("10 per minute")
 def github_callback():
     code = request.args.get('code')
-    state = request.args.get('state', 'web') # Default to web if state is missing
+    state = request.args.get('state', 'web')
     
-    # --- GRADER INTERCEPT (Kept from original) ---[cite: 1]
-    if code == 'test_code':
-        target_user = User.query.filter_by(username='analyst').first()
-        if not target_user:
-            return jsonify({"error": "Analyst user not found"}), 404
-        access = create_access_token(identity=target_user.id, additional_claims={"role": target_user.role})
-        refresh = create_refresh_token(identity=target_user.id)
-        return jsonify({"access_token": access, "refresh_token": refresh, "status": "success"}), 200
-
     if not code:
         return jsonify({"status": "error", "message": "Code required"}), 400
 
-    # --- ACTUAL GITHUB OAUTH EXCHANGE ---
-    # Use the Railway URI here to match the settings exactly[cite: 1]
-    redirect_uri = GITHUB_REDIRECT_URI
-
+    # 1. Exchange code for GitHub Access Token (Single Use)
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
         json={
             'client_id': GITHUB_CLIENT_ID,
             'client_secret': GITHUB_CLIENT_SECRET,
             'code': code,
-            'redirect_uri': redirect_uri
+            'redirect_uri': GITHUB_REDIRECT_URI
         },
         headers={'Accept': 'application/json'}
     ).json()
@@ -284,12 +272,13 @@ def github_callback():
     if 'access_token' not in token_resp:
         return jsonify({"status": "error", "message": "Invalid code from GitHub"}), 401
 
+    # 2. Get User Info from GitHub
     user_data = requests.get(
         'https://api.github.com/user',
         headers={'Authorization': f"token {token_resp['access_token']}"}
     ).json()
 
-    # --- USER SYNC (Kept original logic with UUIDs and Email Linking) ---[cite: 1]
+    # 3. Sync User in Database (UUID & Email logic)
     user = User.query.filter_by(github_id=str(user_data['id'])).first()
     if not user:
         user = User.query.filter_by(email=user_data.get('email')).first()
@@ -309,19 +298,18 @@ def github_callback():
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
 
-    # Generate JWTs[cite: 1]
-    access = create_access_token(identity=user.id, additional_claims={"role": user.role})
-    refresh = create_refresh_token(identity=user.id)
+    # 4. Generate your JWTs
+    access = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    refresh = create_refresh_token(identity=str(user.id))
 
-    # --- FINAL REDIRECT BASED ON STATE ---[cite: 1]
+    # --- FINAL DELIVERY ---
     if 'cli' in state:
-        # User is using the CLI[cite: 1]
-        local_redirect = f"http://localhost:8001/?code={code}"
-        html = f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={local_redirect}\"/></head><body>Redirecting to CLI...</body></html>"
+        # Pass tokens directly to the CLI local server
+        cli_url = f"http://localhost:8001/?access_token={access}&refresh_token={refresh}"
+        html = f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={cli_url}\"/></head><body>Login successful! Returning to terminal...</body></html>"
         return make_response(html, 200, {'Content-Type': 'text/html'})
 
-    # User is on the Web Portal. 
-    # Redirect to Dashboard and SET COOKIES so the browser stays logged in.[cite: 1]
+    # Web Portal: Set cookies and redirect
     response = redirect(f"{FRONTEND_URL}/dashboard")
     set_access_cookies(response, access)
     set_refresh_cookies(response, refresh)
