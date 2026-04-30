@@ -44,8 +44,8 @@ app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(minutes=5) # Per Requirement
 app.config['JWT_TOKEN_LOCATION'] = ['headers', 'cookies']
 app.config['JWT_COOKIE_CSRF_PROTECT'] = True  # Enable CSRF protection (Requirement 4)
 # Ensure cookies are sent in cross-site requests
-app.config['JWT_COOKIE_SAMESITE'] = 'Lax' 
-app.config['JWT_COOKIE_SECURE'] = os.environ.get('DEBUG', 'False').lower() != 'true'  # True in production (HTTPS), False for local dev
+app.config['JWT_COOKIE_SAMESITE'] = 'None' 
+app.config['JWT_COOKIE_SECURE'] = True
 app.config['JWT_CSRF_CHECK_FORM'] = True 
 # Allow JavaScript to read the CSRF cookie (but NOT the JWT tokens)
 app.config['JWT_CSRF_COOKIE_HTTPONLY'] = False
@@ -53,7 +53,7 @@ app.config['JWT_ACCESS_COOKIE_NAME'] = 'access_token_cookie'
 app.config['JWT_REFRESH_COOKIE_NAME'] = 'refresh_token_cookie'
 GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID')
 GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET')
-GITHUB_REDIRECT_URI = os.environ.get('GITHUB_REDIRECT_URI', 'http://localhost:8001')
+GITHUB_REDIRECT_URI = os.environ.get('GITHUB_REDIRECT_URI')
 
 # Token Blacklist (for logout and refresh rotation)
 blacklist = set()
@@ -623,6 +623,26 @@ def get_stats():
             "recent": [p.to_dict() for p in recent_profiles]
         }
     })
+
+
+@app.route('/api/me', methods=['GET'])
+@jwt_required()
+def get_me():
+    # get_jwt_identity() returns the 'sub' claim (user.id) from your token
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"msg": "User not found"}), 404
+
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "github_id": user.github_id
+    }), 200
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
