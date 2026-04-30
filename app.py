@@ -14,13 +14,15 @@ from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity, get_jwt, decode_token,
-    get_jti
+    get_jti, set_access_cookies, set_refresh_cookies
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+# Allow configuring frontend origin from env for local development and deployment
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 
 load_dotenv()
 # --- CONFIGURATION ---
@@ -37,7 +39,7 @@ app.config['JWT_TOKEN_LOCATION'] = ['headers', 'cookies']
 app.config['JWT_COOKIE_CSRF_PROTECT'] = True  # Enable CSRF protection (Requirement 4)
 # Ensure cookies are sent in cross-site requests
 app.config['JWT_COOKIE_SAMESITE'] = 'Lax' 
-app.config['JWT_COOKIE_SECURE'] = True  # Must be True in production (HTTPS)
+app.config['JWT_COOKIE_SECURE'] = os.environ.get('DEBUG', 'False').lower() != 'true'  # True in production (HTTPS), False for local dev
 app.config['JWT_CSRF_CHECK_FORM'] = True 
 # Allow JavaScript to read the CSRF cookie (but NOT the JWT tokens)
 app.config['JWT_CSRF_COOKIE_HTTPONLY'] = False
@@ -396,27 +398,11 @@ def web_callback():
             "avatar_url": user.avatar_url
         }
     }))
-    
-    # Set cookies with strict security flags
-    # secure=True requires HTTPS (ensure this is True for Railway deployment)
-    response.set_cookie(
-        'access_token_cookie', 
-        access,
-        httponly=True, 
-        secure=True, 
-        samesite='Lax', 
-        max_age=180 # 3 minutes per requirement
-    )
-    
-    response.set_cookie(
-        'refresh_token_cookie', 
-        refresh,
-        httponly=True, 
-        secure=True, 
-        samesite='Lax', 
-        max_age=300 # 5 minutes per requirement
-    )
-    
+
+    # Use flask_jwt_extended helpers to correctly set cookies and CSRF tokens
+    set_access_cookies(response, access)
+    set_refresh_cookies(response, refresh)
+
     return response
 
 
