@@ -623,14 +623,17 @@ def get_me():
     if not user:
         return jsonify({"msg": "User not found"}), 404
     
-    user_dict = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "github_id": user.github_id
-    }
-    return jsonify(user_dict), 200
+    # Matching my frontend's expectation of avatar_url and a wrapped dictionary
+    return jsonify({
+        "user_dict": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "github_id": user.github_id,
+            "avatar_url": user.avatar_url # Added this so your <img> tag works
+        }
+    }), 200
 
 
 if __name__ == '__main__':
