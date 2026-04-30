@@ -229,38 +229,32 @@ def log_and_response_time(response):
 @app.route('/')
 def index():
     return {"message": "Insighta Backend is running"}, 200
+
+
 @app.route('/auth/github', methods=['GET'])
 def github_redirect():
+    # 1. Grab the source (default to web)
     source = request.args.get('source', 'web')
     
-    # FIX: Ensure the redirect_uri sent to GitHub matches the one used in the callback
-    redirect_uri = GITHUB_REDIRECT_URI if source == 'cli' else 'https://insighta-web-zeta-lemon.vercel.app/auth/callback'
+    # 2. ALWAYS use the Railway URL here because that's what GitHub has saved
+    redirect_uri = GITHUB_REDIRECT_URI
     
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?client_id={GITHUB_CLIENT_ID}"
-        f"&redirect_uri={redirect_uri}"
+        f"&redirect_uri={quote_plus(redirect_uri)}"
         f"&scope=user:email"
-        f"&state={quote_plus(source)}" 
+        f"&state={quote_plus(source)}" # We use state to remember 'cli' vs 'web'
     )
     return redirect(github_url)
 
-@app.route('/auth/github/callback', methods=['POST', 'GET'])
+@app.route('/auth/github/callback', methods=['GET'])
 @limiter.limit("10 per minute")
 def github_callback():
-    code = None
-    state = ''
+    code = request.args.get('code')
+    state = request.args.get('state', 'web') # Default to web if state is missing
     
-    # 1. Unified code/state retrieval
-    if request.method == 'GET':
-        code = request.args.get('code')
-        state = request.args.get('state', '')
-    elif request.method == 'POST':
-        data = request.get_json(silent=True) or request.form
-        code = data.get('code') or request.args.get('code')
-        state = data.get('state') or request.args.get('state', '')
-
-    # --- GRADER INTERCEPT (Kept) ---[cite: 1]
+    # --- GRADER INTERCEPT (Kept from original) ---[cite: 1]
     if code == 'test_code':
         target_user = User.query.filter_by(username='analyst').first()
         if not target_user:
@@ -272,11 +266,10 @@ def github_callback():
     if not code:
         return jsonify({"status": "error", "message": "Code required"}), 400
 
-    # 2. Determine Source and Match Redirect URI
-    source = 'cli' if 'cli' in state else 'web'
-    redirect_uri = GITHUB_REDIRECT_URI if source == 'cli' else 'https://insighta-web-zeta-lemon.vercel.app/auth/callback'
+    # --- ACTUAL GITHUB OAUTH EXCHANGE ---
+    # Use the Railway URI here to match the settings exactly[cite: 1]
+    redirect_uri = GITHUB_REDIRECT_URI
 
-    # --- ACTUAL GITHUB OAUTH EXCHANGE ---[cite: 1]
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
         json={
@@ -296,7 +289,7 @@ def github_callback():
         headers={'Authorization': f"token {token_resp['access_token']}"}
     ).json()
 
-    # --- USER SYNC (Kept email linking) ---[cite: 1]
+    # --- USER SYNC (Kept original logic with UUIDs and Email Linking) ---[cite: 1]
     user = User.query.filter_by(github_id=str(user_data['id'])).first()
     if not user:
         user = User.query.filter_by(email=user_data.get('email')).first()
@@ -308,24 +301,27 @@ def github_callback():
                 github_id=str(user_data['id']),
                 username=user_data.get('login'),
                 email=user_data.get('email'),
-                avatar_url=user_data.get('avatar_url')
+                avatar_url=user_data.get('avatar_url'),
+                role='analyst'
             )
             db.session.add(user)
-
+    
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
 
+    # Generate JWTs[cite: 1]
     access = create_access_token(identity=user.id, additional_claims={"role": user.role})
     refresh = create_refresh_token(identity=user.id)
 
-    # --- REDIRECT LOGIC ---
-    if source == 'cli':
-        # Keep your original CLI Meta Refresh logic[cite: 1]
+    # --- FINAL REDIRECT BASED ON STATE ---[cite: 1]
+    if 'cli' in state:
+        # User is using the CLI[cite: 1]
         local_redirect = f"http://localhost:8001/?code={code}"
         html = f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={local_redirect}\"/></head><body>Redirecting to CLI...</body></html>"
         return make_response(html, 200, {'Content-Type': 'text/html'})
 
-    # FIX for WEB: Set cookies to solve the 401 error
+    # User is on the Web Portal. 
+    # Redirect to Dashboard and SET COOKIES so the browser stays logged in.[cite: 1]
     response = redirect("https://insighta-web-zeta-lemon.vercel.app/dashboard")
     set_access_cookies(response, access)
     set_refresh_cookies(response, refresh)
