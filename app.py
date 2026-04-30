@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import requests
+from urllib.parse import quote_plus
 import uuid6
 import csv
 import io
@@ -220,19 +221,41 @@ def log_and_response_time(response):
 
 @app.route('/auth/github', methods=['GET'])
 def github_redirect():
+    # Support a CLI bridge when callers open /auth/github?source=cli
+    source = request.args.get('source')
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?client_id={GITHUB_CLIENT_ID}"
         f"&redirect_uri={GITHUB_REDIRECT_URI}"
         f"&scope=user:email"
     )
+    if source:
+        github_url = github_url + f"&state={quote_plus(source)}"
     return redirect(github_url)
 
 @app.route('/auth/github/callback', methods=['POST', 'GET'])
 @limiter.limit("10 per minute")
 def github_callback():
-    data = request.json
-    code = data.get('code')
+    # Handle GET redirects from GitHub (browser) and POST/JSON code exchanges
+    if request.method == 'GET':
+        code = request.args.get('code')
+        state = request.args.get('state', '')
+        if not code:
+            return jsonify({"status": "error", "message": "Code required"}), 400
+
+        # If this was initiated by the CLI, bridge the code back to localhost
+        if 'cli' in state:
+            local_redirect = f"http://localhost:8001/?code={code}"
+            html = (
+                f"<html><head><meta http-equiv=\"refresh\" content=\"0;url={local_redirect}\"/>"
+                f"</head><body>Redirecting to CLI. If you are not redirected, "
+                f"<a href=\"{local_redirect}\">click here</a>.</body></html>"
+            )
+            return make_response(html, 200, {'Content-Type': 'text/html'})
+
+    # For POST (or fallback), accept a JSON body or query param with the code
+    data = request.json or {}
+    code = data.get('code') or request.args.get('code')
     if not code:
         return jsonify({"status": "error", "message": "Code required"}), 400
 
@@ -264,7 +287,7 @@ def github_callback():
             avatar_url=user_data.get('avatar_url')
         )
         db.session.add(user)
-    
+
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
 
@@ -563,7 +586,7 @@ def get_stats():
                 "profiles": total_profiles,
                 "users": total_users
             },
-            "distribution": {dict(gender_stats)},
+            "distribution": dict(gender_stats),
             "recent": [p.to_dict() for p in recent_profiles]
         }
     })
