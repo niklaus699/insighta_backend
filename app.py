@@ -42,13 +42,13 @@ app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-ke
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=3)  # Per Requirement
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(minutes=5) # Per Requirement
 app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
-app.config['JWT_COOKIE_CSRF_PROTECT'] = False  # Enable CSRF protection (Requirement 4)
+app.config['JWT_COOKIE_CSRF_PROTECT'] = True  # Enable CSRF protection (Requirement 4)
 # Ensure cookies are sent in cross-site requests
 app.config['JWT_COOKIE_SAMESITE'] = 'None' 
 app.config['JWT_COOKIE_SECURE'] = True
 app.config['JWT_CSRF_CHECK_FORM'] = True 
 # Allow JavaScript to read the CSRF cookie (but NOT the JWT tokens)
-app.config['JWT_CSRF_COOKIE_HTTPONLY'] = False
+app.config['JWT_CSRF_COOKIE_HTTPONLY'] = True
 app.config['JWT_ACCESS_COOKIE_NAME'] = 'access_token_cookie'
 app.config['JWT_REFRESH_COOKIE_NAME'] = 'refresh_token_cookie'
 GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID')
