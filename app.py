@@ -25,7 +25,7 @@ FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 # Include both the configured frontend and common local dev origin; explicit headers/methods allow preflight
 CORS(app,
     supports_credentials=True,
-    origins=[FRONTEND_URL, 'https://insighta-web-zeta-lemon.vercel.app', 'http://localhost:3000'],
+    origins=[FRONTEND_URL, 'http://localhost:3000'],
     allow_headers=['Content-Type', 'X-API-Version', 'Authorization', 'X-CSRF-TOKEN'],
     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 )
@@ -41,8 +41,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key-change-in-production')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=3)  # Per Requirement
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(minutes=5) # Per Requirement
-app.config['JWT_TOKEN_LOCATION'] = ['headers', 'cookies']
-app.config['JWT_COOKIE_CSRF_PROTECT'] = True  # Enable CSRF protection (Requirement 4)
+app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
+app.config['JWT_COOKIE_CSRF_PROTECT'] = False  # Enable CSRF protection (Requirement 4)
 # Ensure cookies are sent in cross-site requests
 app.config['JWT_COOKIE_SAMESITE'] = 'None' 
 app.config['JWT_COOKIE_SECURE'] = True
@@ -322,7 +322,7 @@ def github_callback():
 
     # User is on the Web Portal. 
     # Redirect to Dashboard and SET COOKIES so the browser stays logged in.[cite: 1]
-    response = redirect("https://insighta-web-zeta-lemon.vercel.app/dashboard")
+    response = redirect(f"{FRONTEND_URL}/dashboard")
     set_access_cookies(response, access)
     set_refresh_cookies(response, refresh)
     return response
