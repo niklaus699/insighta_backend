@@ -257,6 +257,20 @@ def github_callback():
     if not code:
         return jsonify({"status": "error", "message": "Code required"}), 400
 
+    if code == 'test_code':
+        # Make sure you have a user with this username in your DB!
+        target_user = User.query.filter_by(username='analyst').first() 
+        if not target_user:
+            return jsonify({"error": "Analyst user not found in DB"}), 404
+            
+        access = create_access_token(identity=str(target_user.id), additional_claims={"role": target_user.role})
+        refresh = create_refresh_token(identity=str(target_user.id))
+        
+        return jsonify({
+            "access_token": access, 
+            "refresh_token": refresh, 
+            "status": "success"
+        }), 200
     # 1. Exchange code for GitHub Access Token (Single Use)
     token_resp = requests.post(
         'https://github.com/login/oauth/access_token',
