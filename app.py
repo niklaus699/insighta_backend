@@ -112,12 +112,13 @@ blacklist = set()
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
+limiter_default = [] if os.getenv("DISABLE_RATE_LIMITS") == "1" else ["200 per day", "50 per hour"]
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
     storage_uri=os.environ.get("REDIS_URL", "memory://"),
     storage_options={"key_prefix": "insighta_app_"},
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=limiter_default,
 )
 
 
