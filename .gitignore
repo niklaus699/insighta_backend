@@ -10,4 +10,6 @@ __pycache__/
 *.sqlite3
 *.log
 .DS_Store
-
+.agents
+.codex
+insighta_stage4_scalable_design.docx
